@@ -2,10 +2,13 @@
   "name": "sifam-proxy",
   "version": "1.0.0",
   "description": "Proxy API SIFAM vers Shopify",
-  "main": "server.js",
   "type": "module",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "axios": "^1.7.0",

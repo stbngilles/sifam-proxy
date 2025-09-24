@@ -41,7 +41,7 @@ app.get("/stock/:ref", async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-// 4) Photos
+// 4) Photos d’un article
 app.get("/photos/:ref", async (req, res) => {
   const ref = req.params.ref.replaceAll("/", "~");
   const url = `${API}/api/photos/${ref}.json?api_key=${KEY}`;
@@ -49,7 +49,7 @@ app.get("/photos/:ref", async (req, res) => {
   catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-// 5) Commande
+// 5) Envoi commande (dropshipping)
 app.post("/commande", async (req, res) => {
   try {
     const r = await axios.post(`${API}/api/commande.json?api_key=${KEY}`, req.body, {

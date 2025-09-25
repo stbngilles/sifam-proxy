@@ -7,6 +7,8 @@ const SHOP        = process.env.SHOPIFY_DOMAIN || process.env.SHOPIFY_STORE_DOMA
 const TOKEN       = process.env.SHOPIFY_TOKEN  || process.env.SHOPIFY_ADMIN_TOKEN;
 const PROXY       = process.env.PROXY_BASE      || process.env.PROXY_URL || 'https://sifam-proxy.onrender.com';
 const DEC         = Number.parseInt(process.env.CURRENCY_DECIMALS || '2', 10);
+const ONLY_SKU = (process.env.ONLY_SKU || '').trim();
+
 
 // Garde-fous
 if (!SHOP)  throw new Error('SHOPIFY_DOMAIN / SHOPIFY_STORE_DOMAIN manquant');
@@ -92,7 +94,7 @@ async function priceForSku(sku) {
 
 // Met à jour le prix d’une variante Shopify
 async function setPrice(variantGid, price) {
-  // 1) Tentative GraphQL (si le schéma Admin est bien exposé)
+  // 1) tentative GraphQL
   const mutation = `
     mutation UpdateVariant($input: ProductVariantInput!) {
       productVariantUpdate(input: $input) {
@@ -106,12 +108,29 @@ async function setPrice(variantGid, price) {
     if (errs.length) throw new Error('userErrors: ' + JSON.stringify(errs));
     return;
   } catch (e) {
-    // Si le schéma ne connaît pas productVariantUpdate, on passe en REST
-    if (!String(e.message).includes("productVariantUpdate")) {
-      // vraie erreur GraphQL autre que "champ inconnu"
-      throw e;
-    }
+    if (!String(e.message).includes("productVariantUpdate")) throw e;
   }
+
+  // 2) fallback REST /variants/{id}.json
+  const numericId = String(variantGid).split('/').pop();
+  const url = `https://${SHOP}/admin/api/${API_VERSION}/variants/${numericId}.json`;
+  const body = { variant: { id: Number(numericId), price: Number(price.toFixed(DEC)) } };
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'X-Shopify-Access-Token': TOKEN,
+      'Content-Type': 'application/json'
+    },
+    signal: AbortSignal.timeout(30000), // 30s pour être large
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`REST PUT failed ${res.status}: ${txt}`);
+  }
+}
+
 
   // 2) Fallback REST Admin: /admin/api/{version}/variants/{numericId}.json
   const numericId = String(variantGid).split('/').pop(); // extrait 1234567890 de gid://shopify/ProductVariant/1234567890
@@ -141,6 +160,8 @@ async function main() {
 
   for await (const v of iterVariants()) {
     if (!v.sku) { emptySku++; continue; }
+    if (ONLY_SKU && v.sku !== ONLY_SKU) { continue; }
+
 
     const p = await priceForSku(v.sku);
     if (p == null) { skipped++; continue; }

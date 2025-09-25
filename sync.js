@@ -151,7 +151,7 @@ async function setPrice(variantGid, price) {
     const txt = await res.text().catch(() => '');
     throw new Error(`REST PUT failed ${res.status}: ${txt}`);
   }
-}
+
 
 
 // ====== Programme principal ======

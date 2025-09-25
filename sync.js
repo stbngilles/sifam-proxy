@@ -1,6 +1,5 @@
 // sync.js — Synchro PRIX_PUBLIC (HT) -> Shopify Variant.price
 // Node 18+ (fetch natif) — ESM
-import 'dotenv/config';
 
 // ====== Config ENV (accepte deux conventions de noms) ======
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-07';

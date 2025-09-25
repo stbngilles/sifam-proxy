@@ -1,6 +1,14 @@
 import express from "express";
 import axios from "axios";
+import cors from "cors";
+app.use(cors({ origin: "*" }));
 
+
+const app = express();
+app.use(express.json());
+
+const API = "http://api.sifam.fr";
+const KEY = process.env.SIFAM_API_KEY;
 const app = express();
 app.use(express.json());
 

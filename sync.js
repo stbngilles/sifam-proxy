@@ -1,75 +1,136 @@
-// sync.js — synchro PRIX_PUBLIC (HT) -> Shopify Variant.price
-// ESM + Node 20 (fetch natif)
+// sync.js — Synchro PRIX_PUBLIC (HT) -> Shopify Variant.price
+// Node 18+ (fetch natif) — ESM
+import 'dotenv/config';
 
-const SHOP = process.env.SHOPIFY_DOMAIN;
-const TOKEN = process.env.SHOPIFY_TOKEN;
-const PROXY = process.env.PROXY_BASE || "https://sifam-proxy.onrender.com";
-const DEC = parseInt(process.env.CURRENCY_DECIMALS || "2", 10);
+// ====== Config ENV (accepte deux conventions de noms) ======
+const API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-07';
+const SHOP        = process.env.SHOPIFY_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN;
+const TOKEN       = process.env.SHOPIFY_TOKEN  || process.env.SHOPIFY_ADMIN_TOKEN;
+const PROXY       = process.env.PROXY_BASE      || process.env.PROXY_URL || 'https://sifam-proxy.onrender.com';
+const DEC         = Number.parseInt(process.env.CURRENCY_DECIMALS || '2', 10);
 
-const gql = async (query, variables = {}) => {
-  const r = await fetch(`https://${SHOP}/admin/api/2024-07/graphql.json`, {
-    method: "POST",
-    headers: { "X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables })
-  });
-  const j = await r.json();
-  if (!r.ok || j.errors) throw new Error("GraphQL: " + JSON.stringify(j.errors || j));
-  return j.data;
-};
+// Garde-fous
+if (!SHOP)  throw new Error('SHOPIFY_DOMAIN / SHOPIFY_STORE_DOMAIN manquant');
+if (!TOKEN) throw new Error('SHOPIFY_TOKEN / SHOPIFY_ADMIN_TOKEN manquant');
+if (!Number.isFinite(DEC) || DEC < 0 || DEC > 4) throw new Error('CURRENCY_DECIMALS invalide');
 
-async function* variants() {
+// Logs utiles
+console.log('-> Shopify :', SHOP, 'API', API_VERSION);
+console.log('-> Proxy   :', PROXY);
+
+// ====== Utilitaires ======
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const toRef = (s) => s.replace(/\//g, '~'); // règle Sifam
+const withTimeout = (ms) => ({ signal: AbortSignal.timeout(ms) });
+
+// Requêtes GraphQL Shopify (avec petits retries)
+async function gql(query, variables = {}, retries = 2) {
+  const url = `https://${SHOP}/admin/api/${API_VERSION}/graphql.json`;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': TOKEN,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query, variables }),
+      ...withTimeout(20000)
+    });
+    let payload;
+    try { payload = await res.json(); } catch { payload = null; }
+
+    if (res.ok && payload && !payload.errors) return payload.data;
+
+    // userErrors sont renvoyés dans data.*.userErrors, pas dans payload.errors
+    // On laisse le caller gérer ces cas-là. Ici on retry seulement erreurs réseau/serveur.
+    const shouldRetry = !res.ok || !!payload?.errors;
+    if (attempt < retries && shouldRetry) {
+      await sleep(600 * (attempt + 1));
+      continue;
+    }
+    throw new Error(`GraphQL fail: status=${res.status} body=${JSON.stringify(payload)}`);
+  }
+}
+
+// Itérateur sur toutes les variantes avec pagination
+async function* iterVariants() {
   let cursor = null;
+  const query = `
+    query Variants($cursor: String) {
+      productVariants(first: 250, after: $cursor) {
+        edges {
+          cursor
+          node { id sku }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }`;
   while (true) {
-    const q = `query($cursor:String){
-      productVariants(first:250, after:$cursor){
-        edges{ cursor node{ id sku } }
-        pageInfo{ hasNextPage endCursor }
-      }}`;
-    const d = await gql(q, { cursor });
-    const pv = d.productVariants;
+    const data = await gql(query, { cursor });
+    const pv = data.productVariants;
     for (const e of pv.edges) yield e.node;
     if (!pv.pageInfo.hasNextPage) break;
     cursor = pv.pageInfo.endCursor;
   }
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const toRef = s => s.replace(/\//g, "~"); // règle Sifam
-
+// Récupère PRIX_PUBLIC via ton proxy pour un SKU donné
 async function priceForSku(sku) {
   if (!sku) return null;
   const u = `${PROXY}/stock/${encodeURIComponent(toRef(sku))}`;
-  const r = await fetch(u, { signal: AbortSignal.timeout(15000) });
-  if (!r.ok) return null;
-  const body = await r.json();
+  const res = await fetch(u, withTimeout(15000)).catch(() => null);
+  if (!res || !res.ok) return null;
+
+  let body;
+  try { body = await res.json(); } catch { return null; }
   const obj = Array.isArray(body) ? body[0] : body;
   if (!obj || obj.PRIX_PUBLIC == null) return null;
-  const n = Number(String(obj.PRIX_PUBLIC).replace(",", "."));
-  return Number.isFinite(n) ? Number(n.toFixed(DEC)) : null;
+
+  const n = Number(String(obj.PRIX_PUBLIC).replace(',', '.'));
+  if (!Number.isFinite(n)) return null;
+  return Number(n.toFixed(DEC));
 }
 
+// Met à jour le prix d’une variante Shopify
 async function setPrice(variantId, price) {
-  const m = `mutation($input:ProductVariantInput!){
-    productVariantUpdate(input:$input){
-      productVariant{ id price }
-      userErrors{ field message }
-    }}`;
-  const d = await gql(m, { input: { id: variantId, price: price.toFixed(DEC) } });
-  const errs = d.productVariantUpdate.userErrors;
-  if (errs?.length) throw new Error("userErrors: " + JSON.stringify(errs));
+  const mutation = `
+    mutation UpdateVariant($input: ProductVariantInput!) {
+      productVariantUpdate(input: $input) {
+        productVariant { id price }
+        userErrors { field message }
+      }
+    }`;
+  const data = await gql(mutation, { input: { id: variantId, price: price.toFixed(DEC) } });
+  const errs = data.productVariantUpdate?.userErrors || [];
+  if (errs.length) throw new Error('userErrors: ' + JSON.stringify(errs));
 }
 
+// ====== Programme principal ======
 async function main() {
-  let updated = 0, skipped = 0;
-  for await (const v of variants()) {
-    if (!v.sku) { skipped++; continue; }
+  let updated = 0, skipped = 0, emptySku = 0, failed = 0;
+
+  for await (const v of iterVariants()) {
+    if (!v.sku) { emptySku++; continue; }
+
     const p = await priceForSku(v.sku);
     if (p == null) { skipped++; continue; }
-    await setPrice(v.id, p);
-    updated++;
-    await sleep(200); // throttle doux
+
+    try {
+      await setPrice(v.id, p);
+      updated++;
+    } catch (e) {
+      failed++;
+      console.error(`[FAIL] variant ${v.id} sku ${v.sku}:`, e.message || e);
+    }
+
+    // throttle doux pour rester sous les limites API
+    await sleep(200);
   }
-  console.log(JSON.stringify({ updated, skipped }));
+
+  console.log(JSON.stringify({ updated, skipped, emptySku, failed }));
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

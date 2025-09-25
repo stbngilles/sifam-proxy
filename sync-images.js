@@ -1,4 +1,4 @@
-// sync-images.js — Import photos Sifam -> Shopify, attache aux variantes (avec fallback base64)
+// sync-images.js — Import photos Sifam -> Shopify, attache aux variantes (src direct + fallback base64 + multi-URL)
 // Node 18+ (fetch natif) — ESM
 import 'dotenv/config';
 
@@ -22,24 +22,38 @@ if (MAX_UPLOADS) console.log('-> MAX_UPLOADS:', MAX_UPLOADS);
 // ====== Utils ======
 const sleep  = (ms) => new Promise(r => setTimeout(r, ms));
 const toRef  = (s)  => s.replace(/\//g, '~'); // règle Sifam
-const norm   = (url) => String(url || '').trim().replace(/^http:/i, 'http:').replace(/^https:/i, 'https:');
 const tmo    = (ms) => ({ signal: AbortSignal.timeout(ms) });
 
+// normalisation URL + petit nettoyage
+const norm = (url) =>
+  String(url || '')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/^http:/i, 'http:')
+    .replace(/^https:/i, 'https:');
+
+// extrait une URL depuis n’importe quel format d’objet
 function extractUrlFromAny(x) {
   if (!x) return null;
   if (typeof x === 'string') return x;
   if (typeof x === 'object') {
-    // Cherche un champ plausible d’URL
-    const candidates = ['url', 'src', 'href', 'image', 'IMAGE', 'URL', 'SRC', 'link'];
+    const candidates = ['url','src','href','image','IMAGE','URL','SRC','link'];
     for (const k of candidates) {
       if (typeof x[k] === 'string' && x[k].trim()) return x[k];
     }
-    // Sinon, prend la première valeur chaîne trouvée
     for (const v of Object.values(x)) {
       if (typeof v === 'string' && v.trim()) return v;
     }
   }
   return null;
+}
+
+// certaines entrées renvoient "url|url2|url3"
+function explodeMulti(url) {
+  return String(url)
+    .split('|')
+    .map(s => s.trim())
+    .filter(Boolean);
 }
 
 async function retry(fn, tries = 3, baseDelay = 700) {
@@ -96,17 +110,24 @@ async function* iterProducts() {
 async function fetchSifamPhotos(sku) {
   const ref = toRef(sku);
 
+  const normalizeList = (raw) => {
+    const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.photos) ? raw.photos : []);
+    const urls = arr
+      .map(extractUrlFromAny)
+      .filter(Boolean)
+      .flatMap(explodeMulti)
+      .map(norm)
+      .filter(u => /^https?:\/\/.+\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(u));
+    return [...new Set(urls)];
+  };
+
   // 1) Proxy
   try {
     const r = await fetch(`${PROXY}/photos/${encodeURIComponent(ref)}`, tmo(20000));
     if (r.ok) {
       const body = await r.json();
-      // body peut être: Array<string> OU Array<object> OU { photos: [...] }
-      const raw = Array.isArray(body) ? body : (Array.isArray(body?.photos) ? body.photos : []);
-      if (raw && raw.length) {
-        const urls = raw.map(extractUrlFromAny).filter(Boolean).map(norm);
-        if (urls.length) return urls;
-      }
+      const urls = normalizeList(body);
+      if (urls.length) return urls;
     }
   } catch {}
 
@@ -116,11 +137,9 @@ async function fetchSifamPhotos(sku) {
       const u = `http://api.sifam.fr/api/photos/${encodeURIComponent(ref)}.json?generique=1&api_key=${encodeURIComponent(SIFAM_KEY)}`;
       const r = await fetch(u, tmo(20000));
       if (r.ok) {
-        const arr = await r.json();
-        if (Array.isArray(arr) && arr.length) {
-          const urls = arr.map(extractUrlFromAny).filter(Boolean).map(norm);
-          if (urls.length) return urls;
-        }
+        const body = await r.json();
+        const urls = normalizeList(body);
+        if (urls.length) return urls;
       }
     } catch {}
   }
@@ -128,11 +147,10 @@ async function fetchSifamPhotos(sku) {
   return [];
 }
 
-
 // ====== Fallback base64 quand Shopify refuse l'URL distante ======
 async function fetchBinary(url) {
   const res = await fetch(url, tmo(30000));
-  if (!res.ok) throw new Error(`GET ${res.status} for ${url}`);
+  if (!res.ok) throw new Error(`GET 404 for ${url}`);
   const buf = Buffer.from(await res.arrayBuffer());
   const type = res.headers.get('content-type') || '';
   return { buf, type };
@@ -155,9 +173,8 @@ async function uploadImage(productId, srcUrl, variantIds = []) {
   // 1) Tentative par URL
   {
     const payload = { image: { src: srcUrl } };
-    if (variantIds.length) {
-      payload.image.variant_ids = variantIds.map(v => Number(String(v).split('/').pop()));
-    }
+    if (variantIds.length) payload.image.variant_ids = variantIds.map(v => Number(String(v).split('/').pop()));
+
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
@@ -190,9 +207,7 @@ async function uploadImage(productId, srcUrl, variantIds = []) {
       filename: `sifam_${Date.now()}.${ext}`,
     }
   };
-  if (variantIds.length) {
-    payload2.image.variant_ids = variantIds.map(v => Number(String(v).split('/').pop()));
-  }
+  if (variantIds.length) payload2.image.variant_ids = variantIds.map(v => Number(String(v).split('/').pop()));
 
   const res2 = await fetch(apiUrl, {
     method: 'POST',
@@ -216,9 +231,7 @@ async function main() {
 
   for await (const p of iterProducts()) {
     // Images déjà présentes
-    const existing = new Set(
-      (p.images?.edges || []).map(e => norm(e.node?.src)).filter(Boolean)
-    );
+    const existing = new Set((p.images?.edges || []).map(e => norm(e.node?.src)).filter(Boolean));
 
     // Variantes avec SKU
     const variants = (p.variants?.edges || []).map(e => e.node).filter(v => v?.sku);
@@ -241,25 +254,34 @@ async function main() {
       }
       if (!photos.length) { skipped++; continue; }
 
-      const primary = photos[0];
-      if (!primary || existing.has(primary) || planned.has(primary)) {
-        skipped++;
-        continue;
+      // essaie TOUTES les URLs candidates jusqu’à succès
+      let done = false;
+      for (const u of photos) {
+        if (!u || existing.has(u) || planned.has(u)) { skipped++; continue; }
+
+        try {
+          console.log(`[IMG] product ${p.id} sku ${v.sku} -> ${u}`);
+          await uploadImage(p.id, u, [v.id]);
+          uploaded++;
+          touchedProducts++;
+          existing.add(u);
+          planned.add(u);
+          done = true;
+          break; // on s’arrête dès qu’une URL a marché
+        } catch (e) {
+          const msg = String(e.message || '');
+          failed++;
+          console.error(`[FAIL upload] product ${p.id} sku ${v.sku}:`, msg);
+          // si c’est un 404 sur le GET ou un rejet URL, on tente la suivante; sinon on arrête
+          if (!(msg.includes('GET 404') || msg.includes('Image URL is invalid') || msg.includes('Image POST failed'))) {
+            break;
+          }
+        }
+
+        await sleep(250);
       }
 
-      try {
-        console.log(`[IMG] product ${p.id} sku ${v.sku} -> ${primary}`);
-        await uploadImage(p.id, primary, [v.id]);
-        uploaded++;
-        touchedProducts++;
-        existing.add(primary);
-        planned.add(primary);
-      } catch (e) {
-        failed++;
-        console.error(`[FAIL upload] product ${p.id} sku ${v.sku}:`, e.message || e);
-      }
-
-      // throttle
+      // throttle par variante pour rester cool
       await sleep(250);
 
       if (MAX_UPLOADS > 0 && uploaded >= MAX_UPLOADS) {

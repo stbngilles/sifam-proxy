@@ -93,8 +93,9 @@ async function priceForSku(sku) {
 }
 
 // Met à jour le prix d’une variante Shopify
+// ====== Update prix: GraphQL puis fallback REST ======
 async function setPrice(variantGid, price) {
-  // 1) tentative GraphQL
+  // 1) Tentative GraphQL (si mutation dispo)
   const mutation = `
     mutation UpdateVariant($input: ProductVariantInput!) {
       productVariantUpdate(input: $input) {
@@ -102,29 +103,32 @@ async function setPrice(variantGid, price) {
         userErrors { field message }
       }
     }`;
+
   try {
     const data = await gql(mutation, { input: { id: variantGid, price: price.toFixed(DEC) } });
     const errs = data.productVariantUpdate?.userErrors || [];
     if (errs.length) throw new Error('userErrors: ' + JSON.stringify(errs));
     return;
   } catch (e) {
-    if (!String(e.message).includes("productVariantUpdate")) throw e;
+    // Si le schéma ne connaît pas productVariantUpdate, on bascule REST
+    if (!String(e.message).includes('productVariantUpdate')) throw e;
   }
 
-  // 2) fallback REST /variants/{id}.json
-  const numericId = String(variantGid).split('/').pop();
-  const url = `https://${SHOP}/admin/api/${API_VERSION}/variants/${numericId}.json`;
-  const body = { variant: { id: Number(numericId), price: Number(price.toFixed(DEC)) } };
+  // 2) Fallback REST Admin
+  const numericId = String(variantGid).split('/').pop(); // gid://shopify/ProductVariant/123 -> 123
+  const restUrl   = `https://${SHOP}/admin/api/${API_VERSION}/variants/${numericId}.json`;
+  const body      = { variant: { id: Number(numericId), price: Number(price.toFixed(DEC)) } };
 
-  const res = await fetch(url, {
+  const res = await fetch(restUrl, {
     method: 'PUT',
     headers: {
       'X-Shopify-Access-Token': TOKEN,
       'Content-Type': 'application/json'
     },
-    signal: AbortSignal.timeout(30000), // 30s pour être large
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000)
   });
+
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     throw new Error(`REST PUT failed ${res.status}: ${txt}`);

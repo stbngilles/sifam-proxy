@@ -91,7 +91,8 @@ async function priceForSku(sku) {
 }
 
 // Met à jour le prix d’une variante Shopify
-async function setPrice(variantId, price) {
+async function setPrice(variantGid, price) {
+  // 1) Tentative GraphQL (si le schéma Admin est bien exposé)
   const mutation = `
     mutation UpdateVariant($input: ProductVariantInput!) {
       productVariantUpdate(input: $input) {
@@ -99,10 +100,40 @@ async function setPrice(variantId, price) {
         userErrors { field message }
       }
     }`;
-  const data = await gql(mutation, { input: { id: variantId, price: price.toFixed(DEC) } });
-  const errs = data.productVariantUpdate?.userErrors || [];
-  if (errs.length) throw new Error('userErrors: ' + JSON.stringify(errs));
+  try {
+    const data = await gql(mutation, { input: { id: variantGid, price: price.toFixed(DEC) } });
+    const errs = data.productVariantUpdate?.userErrors || [];
+    if (errs.length) throw new Error('userErrors: ' + JSON.stringify(errs));
+    return;
+  } catch (e) {
+    // Si le schéma ne connaît pas productVariantUpdate, on passe en REST
+    if (!String(e.message).includes("productVariantUpdate")) {
+      // vraie erreur GraphQL autre que "champ inconnu"
+      throw e;
+    }
+  }
+
+  // 2) Fallback REST Admin: /admin/api/{version}/variants/{numericId}.json
+  const numericId = String(variantGid).split('/').pop(); // extrait 1234567890 de gid://shopify/ProductVariant/1234567890
+  const url = `https://${SHOP}/admin/api/${API_VERSION}/variants/${numericId}.json`;
+  const body = { variant: { id: Number(numericId), price: Number(price.toFixed(DEC)) } };
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'X-Shopify-Access-Token': TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`REST PUT failed ${res.status}: ${txt}`);
+  }
 }
+
 
 // ====== Programme principal ======
 async function main() {

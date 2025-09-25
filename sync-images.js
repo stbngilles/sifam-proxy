@@ -25,6 +25,23 @@ const toRef  = (s)  => s.replace(/\//g, '~'); // règle Sifam
 const norm   = (url) => String(url || '').trim().replace(/^http:/i, 'http:').replace(/^https:/i, 'https:');
 const tmo    = (ms) => ({ signal: AbortSignal.timeout(ms) });
 
+function extractUrlFromAny(x) {
+  if (!x) return null;
+  if (typeof x === 'string') return x;
+  if (typeof x === 'object') {
+    // Cherche un champ plausible d’URL
+    const candidates = ['url', 'src', 'href', 'image', 'IMAGE', 'URL', 'SRC', 'link'];
+    for (const k of candidates) {
+      if (typeof x[k] === 'string' && x[k].trim()) return x[k];
+    }
+    // Sinon, prend la première valeur chaîne trouvée
+    for (const v of Object.values(x)) {
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+  }
+  return null;
+}
+
 async function retry(fn, tries = 3, baseDelay = 700) {
   let last;
   for (let i = 0; i < tries; i++) {
@@ -84,8 +101,12 @@ async function fetchSifamPhotos(sku) {
     const r = await fetch(`${PROXY}/photos/${encodeURIComponent(ref)}`, tmo(20000));
     if (r.ok) {
       const body = await r.json();
-      const arr = Array.isArray(body) ? body : body?.photos || [];
-      if (arr && arr.length) return arr.map(norm);
+      // body peut être: Array<string> OU Array<object> OU { photos: [...] }
+      const raw = Array.isArray(body) ? body : (Array.isArray(body?.photos) ? body.photos : []);
+      if (raw && raw.length) {
+        const urls = raw.map(extractUrlFromAny).filter(Boolean).map(norm);
+        if (urls.length) return urls;
+      }
     }
   } catch {}
 
@@ -96,13 +117,17 @@ async function fetchSifamPhotos(sku) {
       const r = await fetch(u, tmo(20000));
       if (r.ok) {
         const arr = await r.json();
-        if (Array.isArray(arr) && arr.length) return arr.map(norm);
+        if (Array.isArray(arr) && arr.length) {
+          const urls = arr.map(extractUrlFromAny).filter(Boolean).map(norm);
+          if (urls.length) return urls;
+        }
       }
     } catch {}
   }
 
   return [];
 }
+
 
 // ====== Fallback base64 quand Shopify refuse l'URL distante ======
 async function fetchBinary(url) {

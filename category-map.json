@@ -1,13 +1,20 @@
 {
   "ECLAIRAGE & SIGNALISATION": {
-    "AMPOULES": ["AMP", "H1", "H4", "H7", "T10", "T15", "BA", "P21", "W5W", "W16W", "BUT", "BULB", "AMP"],
-    "CLIGNOTANTS & FEUX": ["CLI", "FEU", "STOP", "CLIGNO", "IND"],
-    "CENTRALES & RELAIS": ["REL", "CEN", "RELAI", "RELAY"],
+    "AMPOULES": ["H1", "H4", "H7", "T10", "T15", "BA", "P21", "W5W", "W16W", "BUT", "BULB", "LED", "LEDRIVING", "COFFRET"],
+    "CLIGNOTANTS & FEUX": ["CLI", "FEU", "STOP", "IND"],
+    "CENTRALES & RELAIS": ["REL", "CEN", "RELAY"],
     "CATADIOPTRE": ["CAT"],
     "KLAXONS": ["KLA", "HORN"]
   },
-  "EQUIPEMENT MOTO": {
-    "CUSTOMISATION": ["FUS", "POIG", "LEV", "RETRO", "GUIDON", "VIS", "BUL", "SUPPORT", "PLAQUE"],
-    "BAGAGERIE": ["TOP", "SAC", "SACO", "SUPPORTBAG", "BAG"]
+  "ELECTRIQUE MOTO": {
+    "CONTACTEUR & CLEF": ["NEI", "CLE", "LOCK", "SERRURE"],
+    "BOITIER": ["BOIT", "BOX", "ECU"],
+    "CONNECTIQUE": ["COS", "FICHE", "CONNECT"]
+  },
+  "MOTEUR / DEMARRAGE": {
+    "DEMARREUR": ["MA000", "DEM"],
+    "EMBRAYAGE DEMARREUR": ["EDGY6", "ROUE-LIBRE"],
+    "POMPE A ESSENCE": ["GASPUMP", "POMPE", "FUEL"],
+    "SONDE LAMBDA": ["LAMBDA", "O2"]
   }
 }

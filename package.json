@@ -7,7 +7,8 @@
     "start": "node server.js",
     "sync": "node sync.js",
     "sync:images": "node sync-images.js",
-    "sync:categories": "node sync-categories.js"
+    "sync:categories": "node sync-categories.js",
+    "export:uncat": "node export-uncategorized.js"
   },
   "engines": {
     "node": "20.x"

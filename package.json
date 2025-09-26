@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "sync": "node sync.js",
-    "sync:images": "node sync-images.js"
+    "sync:images": "node sync-images.js",
+    "sync:categories": "node sync-categories.js"
   },
   "engines": {
     "node": "20.x"

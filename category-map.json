@@ -1,13 +1,13 @@
 {
   "ECLAIRAGE & SIGNALISATION": {
-    "AMPOULES": ["AMP", "H4", "H7", "T10", "T15", "BA", "P21", "W5W", "W16W", "BUT"],
-    "CLIGNOTANTS & FEUX": ["CLI", "FEU", "STOP"],
-    "CENTRALES & RELAIS": ["REL", "CEN"],
+    "AMPOULES": ["AMP", "H1", "H4", "H7", "T10", "T15", "BA", "P21", "W5W", "W16W", "BUT", "BULB", "AMP"],
+    "CLIGNOTANTS & FEUX": ["CLI", "FEU", "STOP", "CLIGNO", "IND"],
+    "CENTRALES & RELAIS": ["REL", "CEN", "RELAI", "RELAY"],
     "CATADIOPTRE": ["CAT"],
     "KLAXONS": ["KLA", "HORN"]
   },
   "EQUIPEMENT MOTO": {
-    "CUSTOMISATION": ["FUS", "POI", "LEV", "RETRO", "GUIDON", "VIS", "BUL"],
-    "BAGAGERIE": ["TOP", "SAC", "SUPPORT"]
+    "CUSTOMISATION": ["FUS", "POIG", "LEV", "RETRO", "GUIDON", "VIS", "BUL", "SUPPORT", "PLAQUE"],
+    "BAGAGERIE": ["TOP", "SAC", "SACO", "SUPPORTBAG", "BAG"]
   }
 }

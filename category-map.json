@@ -1,0 +1,13 @@
+{
+  "ECLAIRAGE & SIGNALISATION": {
+    "AMPOULES": ["AMP", "H4", "H7", "T10", "T15", "BA", "P21", "W5W", "W16W", "BUT"],
+    "CLIGNOTANTS & FEUX": ["CLI", "FEU", "STOP"],
+    "CENTRALES & RELAIS": ["REL", "CEN"],
+    "CATADIOPTRE": ["CAT"],
+    "KLAXONS": ["KLA", "HORN"]
+  },
+  "EQUIPEMENT MOTO": {
+    "CUSTOMISATION": ["FUS", "POI", "LEV", "RETRO", "GUIDON", "VIS", "BUL"],
+    "BAGAGERIE": ["TOP", "SAC", "SUPPORT"]
+  }
+}

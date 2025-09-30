@@ -1,4 +1,4 @@
-// sync.js — Synchro PRIX_PUBLIC (HT) -> Shopify Variant.price (REST update only)
+// sync.js — Synchro PRIX_PUBLIC Sifam -> Shopify Variant.price
 // Node 18+ (fetch natif) — ESM
 import 'dotenv/config';
 
@@ -6,19 +6,20 @@ import 'dotenv/config';
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-07';
 const SHOP        = process.env.SHOPIFY_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN;
 const TOKEN       = process.env.SHOPIFY_TOKEN  || process.env.SHOPIFY_ADMIN_TOKEN;
-const PROXY       = process.env.PROXY_BASE      || process.env.PROXY_URL || 'https://sifam-proxy.onrender.com';
+const PROXY       = process.env.PROXY_BASE || process.env.PROXY_URL || 'https://sifam-proxy.onrender.com';
 const DEC         = Number.parseInt(process.env.CURRENCY_DECIMALS || '2', 10);
-const ONLY_SKU    = (process.env.ONLY_SKU || '').trim();           // pour tester 1 SKU
-const MAX_UPDATES = Number.parseInt(process.env.MAX_UPDATES || '0', 10); // 0 = illimité
+const VAT_RATE    = Number(process.env.VAT_RATE || '0'); // ex: 0.21 pour BE
+const ONLY_SKU    = (process.env.ONLY_SKU || '').trim();
+const MAX_UPDATES = Number.parseInt(process.env.MAX_UPDATES || '0', 10);
 
 if (!SHOP)  throw new Error('SHOPIFY_DOMAIN / SHOPIFY_STORE_DOMAIN manquant');
 if (!TOKEN) throw new Error('SHOPIFY_TOKEN / SHOPIFY_ADMIN_TOKEN manquant');
-if (!Number.isFinite(DEC) || DEC < 0 || DEC > 4) throw new Error('CURRENCY_DECIMALS invalide');
 
 console.log('-> Shopify :', SHOP, 'API', API_VERSION);
 console.log('-> Proxy   :', PROXY);
 if (ONLY_SKU)    console.log('-> ONLY_SKU:', ONLY_SKU);
 if (MAX_UPDATES) console.log('-> MAX_UPDATES:', MAX_UPDATES);
+if (VAT_RATE)    console.log('-> TVA appliquée:', VAT_RATE * 100, '%');
 
 // ====== Utils ======
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -70,7 +71,7 @@ async function* iterVariants() {
   while (true) {
     const data = await gql(query, { cursor });
     const pv = data.productVariants;
-    for (const e of pv.edges) yield e.node;     // node.id est un GID, node.sku est la référence
+    for (const e of pv.edges) yield e.node;
     if (!pv.pageInfo.hasNextPage) break;
     cursor = pv.pageInfo.endCursor;
   }
@@ -81,21 +82,24 @@ async function priceForSku(sku) {
   if (!sku) return null;
   const url = `${PROXY}/stock/${encodeURIComponent(toRef(sku))}`;
   const once = async () => {
-    const res = await fetch(url, tmo(35000)); // 35s
+    const res = await fetch(url, tmo(35000));
     if (!res.ok) throw new Error(`Proxy ${res.status}`);
     const body = await res.json();
     const obj  = Array.isArray(body) ? body[0] : body;
     if (!obj || obj.PRIX_PUBLIC == null) return null;
-    const n = Number(String(obj.PRIX_PUBLIC).replace(',', '.'));
-    return Number.isFinite(n) ? Number(n.toFixed(DEC)) : null;
+
+    const n = Number(String(obj.PRIX_PUBLIC).replace(',', '.')); // HT
+    if (!Number.isFinite(n)) return null;
+
+    const gross = VAT_RATE ? n * (1 + VAT_RATE) : n; // ajoute TVA si définie
+    return Number(gross.toFixed(DEC));
   };
   return retry(once, { tries: 3, baseDelay: 900 });
 }
 
-// ====== Update prix via REST Admin uniquement ======
+// ====== Update prix via REST Admin ======
 async function setPriceRest(variantGid, price) {
-  // GID -> ID numérique
-  const numericId = String(variantGid).split('/').pop(); // gid://shopify/ProductVariant/123 -> 123
+  const numericId = String(variantGid).split('/').pop();
   const url  = `https://${SHOP}/admin/api/${API_VERSION}/variants/${numericId}.json`;
   const body = { variant: { id: Number(numericId), price: Number(price.toFixed(DEC)) } };
 
@@ -106,7 +110,7 @@ async function setPriceRest(variantGid, price) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body),
-    ...tmo(30000) // 30s
+    ...tmo(30000)
   });
 
   if (!res.ok) {

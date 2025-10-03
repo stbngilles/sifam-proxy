@@ -281,6 +281,27 @@ async function main() {
         await sleep(250);
       }
 
+      // Extra pass: import remaining photos for this variant
+      for (const u of photos) {
+        if (!u || existing.has(u) || planned.has(u)) { continue; }
+        try {
+          console.log(`[IMG][extra] product ${p.id} sku ${v.sku} -> ${u}`);
+          await uploadImage(p.id, u, [v.id]);
+          uploaded++;
+          touchedProducts++;
+          existing.add(u);
+          planned.add(u);
+        } catch (e) {
+          const msg = String(e.message || '');
+          failed++;
+          console.error(`[FAIL upload extra] product ${p.id} sku ${v.sku}:`, msg);
+          if (!(msg.includes('GET 404') || msg.includes('Image URL is invalid') || msg.includes('Image POST failed'))) {
+            break;
+          }
+        }
+        await sleep(250);
+      }
+
       // throttle par variante pour rester cool
       await sleep(250);
 
